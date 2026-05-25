@@ -1,0 +1,520 @@
+#!/usr/bin/env bash
+
+set -eo pipefail
+
+# =============================================================================
+# Rails New - Interactive Script for Docker-based Rails Projects
+# =============================================================================
+# This script creates a new Rails project inside a Docker container,
+# then updates all Docker configuration files with the project name.
+# =============================================================================
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+function print_header {
+  echo -e "${BLUE}"
+  echo "╔══════════════════════════════════════════════════════════════╗"
+  echo "║           Rails New - Docker Project Generator               ║"
+  echo "╚══════════════════════════════════════════════════════════════╝"
+  echo -e "${NC}"
+}
+
+function print_success {
+  echo -e "${GREEN}✓ $1${NC}"
+}
+
+function print_error {
+  echo -e "${RED}✗ $1${NC}"
+}
+
+function print_info {
+  echo -e "${YELLOW}→ $1${NC}"
+}
+
+# -----------------------------------------------------------------------------
+# Validation
+# -----------------------------------------------------------------------------
+
+function get_latest_ruby_version {
+  # Get the latest Ruby version from Docker Hub API
+  # We filter for stable versions (no rc, beta, alpha, preview)
+  # and get the highest version number
+  local latest_version
+  latest_version=$(curl -s "https://hub.docker.com/v2/repositories/library/ruby/tags/?page_size=100&ordering=last_updated" | \
+    grep -o '"name":"[0-9]\+\.[0-9]\+\(\.[0-9]\+\)\?-slim"' | \
+    grep -v "rc\|beta\|alpha\|preview" | \
+    sed 's/"name":"//;s/-slim"//' | \
+    sort -V | \
+    tail -1 | \
+    tr -d '\n')
+  
+  if [ -z "$latest_version" ]; then
+    latest_version="3.4"
+  fi
+  
+  # Extract major.minor for the tag (e.g., 3.4 from 3.4.1)
+  local major_minor
+  major_minor=$(echo "$latest_version" | grep -o '^[0-9]\+\.[0-9]\+' | tr -d '\n')
+  
+  if [ -z "$major_minor" ]; then
+    major_minor="3.4"
+  fi
+  
+  printf '%s' "$major_minor"
+}
+
+function update_dockerfile_ruby_version {
+  print_info "Updating Dockerfiles to use Ruby ${RUBY_VERSION}..."
+  
+  # Update Dockerfile.development - hardcode the version explicitly
+  sed -i.bak \
+    -e "s|FROM ruby:.*-slim AS app|FROM ruby:${RUBY_VERSION}-slim AS app|" \
+    "Dockerfile.development"
+  rm -f "Dockerfile.development.bak"
+  
+  # Note: Dockerfile.production will be created from Rails-generated Dockerfile
+  
+  print_success "Dockerfiles updated to Ruby ${RUBY_VERSION}"
+}
+
+function validate_environment {
+  if ! command -v docker &> /dev/null; then
+    print_error "Docker is not installed. Please install Docker first."
+    exit 1
+  fi
+
+  if ! docker info &> /dev/null; then
+    print_error "Docker daemon is not running. Please start Docker first."
+    exit 1
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# Interactive Prompts
+# -----------------------------------------------------------------------------
+
+function prompt_app_name {
+  while true; do
+    echo -n -e "${YELLOW}Enter your Rails app name (e.g., myapp, blog, shop): ${NC}"
+    read -r APP_NAME
+    
+    if [ -z "$APP_NAME" ]; then
+      print_error "App name cannot be empty."
+      continue
+    fi
+    
+    # Validate app name (Rails convention: lowercase, alphanumeric, underscores)
+    if ! echo "$APP_NAME" | grep -qE '^[a-z][a-z0-9_]*$'; then
+      print_error "Invalid app name. Use lowercase letters, numbers, and underscores only. Must start with a letter."
+      continue
+    fi
+    
+    break
+  done
+}
+
+function prompt_directory_mode {
+  echo
+  echo -e "${YELLOW}Where do you want to generate the Rails app?${NC}"
+  echo "  1) Create a subdirectory named '$APP_NAME' (default)"
+  echo "  2) Generate directly in current directory"
+  echo -n "Choice [1-2] (default: 1): "
+  read -r DIR_CHOICE
+  
+  case "$DIR_CHOICE" in
+    2)
+      USE_SUBDIRECTORY=false
+      # Check if current directory is not empty
+      if [ "$(ls -A .)" ]; then
+        echo
+        print_error "Current directory is not empty!"
+        echo -n -e "${YELLOW}Do you want to continue anyway? (y/N): ${NC}"
+        read -r CONTINUE
+        if [[ ! "$CONTINUE" =~ ^[Yy]$ ]]; then
+          USE_SUBDIRECTORY=true
+          print_info "Switching to subdirectory mode..."
+        fi
+      fi
+      ;;
+    *)
+      USE_SUBDIRECTORY=true
+      ;;
+  esac
+  
+  if [ "$USE_SUBDIRECTORY" = true ]; then
+    # Check if directory already exists
+    if [ -d "$APP_NAME" ]; then
+      print_error "Directory '$APP_NAME' already exists."
+      echo -n -e "${YELLOW}Do you want to overwrite it? (y/N): ${NC}"
+      read -r OVERWRITE
+      if [[ ! "$OVERWRITE" =~ ^[Yy]$ ]]; then
+        prompt_app_name
+        prompt_directory_mode
+        return
+      fi
+      rm -rf "$APP_NAME"
+    fi
+  fi
+}
+
+function prompt_rails_options {
+  echo
+  echo -e "${BLUE}Rails Options:${NC}"
+  echo "  Rails will be installed fresh inside the container."
+  echo
+  
+  # Database
+  echo -e "${YELLOW}Select database:${NC}"
+  echo "  1) PostgreSQL (default - recommended)"
+  echo "  2) MySQL"
+  echo "  3) SQLite"
+  echo -n "Choice [1-3] (default: 1): "
+  read -r DB_CHOICE
+  
+  case "$DB_CHOICE" in
+    2) DB_OPTION="--database=mysql" ;;
+    3) DB_OPTION="--database=sqlite3" ;;
+    *) DB_OPTION="--database=postgresql" ;;
+  esac
+  
+  # CSS Framework
+  echo
+  echo -e "${YELLOW}Select CSS framework:${NC}"
+  echo "  1) Tailwind CSS (default - recommended)"
+  echo "  2) Bootstrap"
+  echo "  3) Bulma"
+  echo "  4) PostCSS"
+  echo "  5) Sass"
+  echo "  6) None"
+  echo -n "Choice [1-6] (default: 1): "
+  read -r CSS_CHOICE
+  
+  case "$CSS_CHOICE" in
+    2) CSS_OPTION="--css=bootstrap" ;;
+    3) CSS_OPTION="--css=bulma" ;;
+    4) CSS_OPTION="--css=postcss" ;;
+    5) CSS_OPTION="--css=sass" ;;
+    6) CSS_OPTION="" ;;
+    *) CSS_OPTION="--css=tailwind" ;;
+  esac
+  
+  # JavaScript
+  echo
+  echo -e "${YELLOW}Select JavaScript approach:${NC}"
+  echo "  1) Import maps (default - recommended, no Node.js needed)"
+  echo "  2) ESBuild"
+  echo "  3) Webpack"
+  echo "  4) Bun"
+  echo -n "Choice [1-4] (default: 1): "
+  read -r JS_CHOICE
+  
+  case "$JS_CHOICE" in
+    2) JS_OPTION="--javascript=esbuild" ;;
+    3) JS_OPTION="--javascript=webpack" ;;
+    4) JS_OPTION="--javascript=bun" ;;
+    *) JS_OPTION="" ;;
+  esac
+  
+  # Additional options
+  echo
+  echo -e "${YELLOW}Additional options (y/N):${NC}"
+  
+  echo -n "Skip git initialization? (default: N): "
+  read -r SKIP_GIT
+  if [[ "$SKIP_GIT" =~ ^[Yy]$ ]]; then
+    SKIP_GIT_OPTION="--skip-git"
+  else
+    SKIP_GIT_OPTION=""
+  fi
+  
+  echo -n "Skip test framework? (default: N): "
+  read -r SKIP_TEST
+  if [[ "$SKIP_TEST" =~ ^[Yy]$ ]]; then
+    SKIP_TEST_OPTION="--skip-test"
+  else
+    SKIP_TEST_OPTION=""
+  fi
+  
+  echo -n "API only (no views)? (default: N): "
+  read -r API_ONLY
+  if [[ "$API_ONLY" =~ ^[Yy]$ ]]; then
+    API_OPTION="--api"
+  else
+    API_OPTION=""
+  fi
+  
+  # Build full options string
+  RAILS_OPTIONS="$DB_OPTION $CSS_OPTION $JS_OPTION $SKIP_GIT_OPTION $SKIP_TEST_OPTION $API_OPTION"
+  RAILS_OPTIONS=$(echo "$RAILS_OPTIONS" | tr -s ' ' | sed 's/^ *//;s/ *$//')
+}
+
+function confirm_options {
+  echo
+  echo -e "${BLUE}══════════════════════════════════════════════════════════════${NC}"
+  echo -e "${GREEN}App Name:${NC} $APP_NAME"
+  echo -e "${GREEN}Directory Mode:${NC} $([ "$USE_SUBDIRECTORY" = true ] && echo "Subdirectory ($APP_NAME)" || echo "Current directory")"
+  echo -e "${GREEN}Ruby Version:${NC} $RUBY_VERSION"
+  echo -e "${GREEN}Rails Options:${NC} $RAILS_OPTIONS"
+  echo -e "${BLUE}══════════════════════════════════════════════════════════════${NC}"
+  echo
+  echo -n -e "${YELLOW}Proceed with creation? (Y/n): ${NC}"
+  read -r CONFIRM
+  
+  if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
+    print_info "Cancelled by user."
+    exit 0
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# Docker Operations
+# -----------------------------------------------------------------------------
+
+function build_base_image {
+  print_info "Building base Docker image with Ruby ${RUBY_VERSION}..."
+  docker build \
+    --build-arg UID="${UID:-1000}" \
+    --build-arg GID="${GID:-1000}" \
+    -f Dockerfile.development \
+    -t rails-base:latest \
+    .
+  print_success "Base image built"
+}
+
+function run_rails_new {
+  print_info "Creating Rails project '$APP_NAME'..."
+  print_info "This may take a few minutes..."
+  
+  if [ "$USE_SUBDIRECTORY" = true ]; then
+    # Create in subdirectory (default behavior)
+    docker run --rm \
+      -v "$(pwd):/app" \
+      -w /app \
+      -e "RAILS_ENV=development" \
+      rails-base:latest \
+      bash -c "
+        gem install rails && \
+        rails new $APP_NAME $RAILS_OPTIONS && \
+        echo 'Rails project created successfully'
+      "
+  else
+    # Create in current directory but with app name
+    docker run --rm \
+      -v "$(pwd):/app" \
+      -w /app \
+      -e "RAILS_ENV=development" \
+      rails-base:latest \
+      bash -c "
+        gem install rails && \
+        rails new . --name=$APP_NAME $RAILS_OPTIONS && \
+        echo 'Rails project created successfully'
+      "
+  fi
+  
+  print_success "Rails project created"
+}
+
+# -----------------------------------------------------------------------------
+# File Updates
+# -----------------------------------------------------------------------------
+
+function update_docker_files {
+  print_info "Updating Docker configuration files..."
+  
+  # Determine target directory
+  local target_dir="."
+  if [ "$USE_SUBDIRECTORY" = true ]; then
+    target_dir="$APP_NAME"
+  fi
+  
+  # Rename Rails-generated Dockerfile to Dockerfile.production and update Ruby version
+  if [ -f "$target_dir/Dockerfile" ]; then
+    sed -i.bak \
+      -e "s|ARG RUBY_VERSION=.*|ARG RUBY_VERSION=${RUBY_VERSION}|" \
+      "$target_dir/Dockerfile"
+    rm -f "$target_dir/Dockerfile.bak"
+    mv "$target_dir/Dockerfile" "$target_dir/Dockerfile.production"
+  fi
+  
+  # Update .env file
+  cat > "$target_dir/.env" << EOF
+# Application Configuration
+APP_NAME=$APP_NAME
+
+# User configuration (must match host user on Linux)
+UID=${UID:-1000}
+GID=${GID:-1000}
+
+# PostgreSQL
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=password
+POSTGRES_DB=${APP_NAME}_development
+
+# Rails
+DATABASE_URL=postgres://postgres:password@postgres:5432/${APP_NAME}_development
+REDIS_URL=redis://redis:6379/0
+EOF
+  
+  # Update docker-compose.yml
+  # Add project name at the top if it doesn't exist
+  if ! grep -q "^name:" "$target_dir/docker-compose.yml"; then
+    sed -i.bak "1s/^/name: $APP_NAME\n/" "$target_dir/docker-compose.yml"
+    rm -f "$target_dir/docker-compose.yml.bak"
+  fi
+  
+  sed -i.bak \
+    -e "s/APP_NAME:-app/APP_NAME:-$APP_NAME/g" \
+    -e "s/container_name: app-/container_name: $APP_NAME-/g" \
+    "$target_dir/docker-compose.yml"
+  rm -f "$target_dir/docker-compose.yml.bak"
+  
+  # Update Procfile.dev to bind to 0.0.0.0 for Docker access
+  if [ -f "$target_dir/Procfile.dev" ]; then
+    sed -i.bak \
+      -e 's|web: bin/rails server|web: bin/rails server -b 0.0.0.0|' \
+      "$target_dir/Procfile.dev"
+    rm -f "$target_dir/Procfile.dev.bak"
+  fi
+  
+  # Update run script
+  sed -i.bak \
+    -e "s/APP_NAME:-app/APP_NAME:-$APP_NAME/g" \
+    "$target_dir/run"
+  rm -f "$target_dir/run.bak"
+  
+  print_success "Docker files updated"
+}
+
+function copy_docker_files {
+  print_info "Copying Docker files to project..."
+  
+  if [ "$USE_SUBDIRECTORY" = true ]; then
+    # When using subdirectory, copy files from template to the new app directory
+    cp docker-compose.yml "$APP_NAME/"
+    cp run "$APP_NAME/"
+  fi
+  # When using current directory, files are already there (from the fork)
+  # We just need to update them in update_docker_files
+  
+  print_success "Docker files copied"
+}
+
+function update_database_config {
+  print_info "Updating database configuration..."
+  
+  # Determine target directory
+  local target_dir="."
+  if [ "$USE_SUBDIRECTORY" = true ]; then
+    target_dir="$APP_NAME"
+  fi
+  
+  # Update config/database.yml to use environment variables
+  if [ -f "$target_dir/config/database.yml" ]; then
+    # Backup original
+    cp "$target_dir/config/database.yml" "$target_dir/config/database.yml.bak"
+    
+    # For PostgreSQL, update the development section
+    if echo "$RAILS_OPTIONS" | grep -q "postgresql"; then
+      cat > "$target_dir/config/database.yml" << 'EOF'
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+
+development:
+  <<: *default
+  url: <%= ENV.fetch("DATABASE_URL") %>
+
+test:
+  <<: *default
+  database: <%= ENV.fetch("APP_NAME", "app") %>_test
+
+production:
+  <<: *default
+  url: <%= ENV.fetch("DATABASE_URL") %>
+EOF
+    fi
+    
+    rm -f "$target_dir/config/database.yml.bak"
+  fi
+  
+  print_success "Database configuration updated"
+}
+
+# -----------------------------------------------------------------------------
+# Main Execution
+# -----------------------------------------------------------------------------
+
+function cleanup_template_files {
+  print_info "Cleaning up template files..."
+  
+  if [ "$USE_SUBDIRECTORY" = true ]; then
+    # Remove template files from project root when using subdirectory
+    rm -f "$APP_NAME/../rails-new"
+    rm -f "$APP_NAME/../.tool-versions"
+    rm -f "$APP_NAME/../.dockerignore"
+  else
+    # When using current directory, only remove template files that shouldn't be there
+    rm -f "rails-new"
+    rm -f ".tool-versions"
+    rm -f ".dockerignore"
+  fi
+  
+  print_success "Template files cleaned up"
+}
+
+function main {
+  print_header
+  
+  validate_environment
+  
+  # Detect latest Ruby version
+  print_info "Detecting latest Ruby version..."
+  RUBY_VERSION=$(get_latest_ruby_version)
+  print_success "Latest Ruby version detected: ${RUBY_VERSION}"
+  echo
+  
+  # Update Dockerfiles with detected version
+  update_dockerfile_ruby_version
+  
+  prompt_app_name
+  prompt_directory_mode
+  prompt_rails_options
+  confirm_options
+  
+  echo
+  print_info "Starting project creation..."
+  echo
+  
+  build_base_image
+  run_rails_new
+  copy_docker_files
+  update_docker_files
+  update_database_config
+  cleanup_template_files
+  
+  echo
+  echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
+  echo -e "${GREEN}  Project '$APP_NAME' created successfully!${NC}"
+  echo -e "${GREEN}  Ruby Version: ${RUBY_VERSION}${NC}"
+  echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
+  echo
+  echo -e "${BLUE}Next steps:${NC}"
+  if [ "$USE_SUBDIRECTORY" = true ]; then
+    echo -e "  cd $APP_NAME"
+  fi
+  echo -e "  ./run build     # Build Docker images"
+  echo -e "  ./run up        # Start development server"
+  echo -e "  ./run cli       # Enter CLI container"
+  echo
+  echo -e "${BLUE}Your app will be available at:${NC} http://localhost:3000"
+  echo
+}
+
+# Run main function
+main

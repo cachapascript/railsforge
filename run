@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+
+set -eo pipefail
+
+# =============================================================================
+# Docker Development Helper Script
+# =============================================================================
+
+DC="${DC:-exec}"
+
+# If we're running in CI we need to disable TTY allocation for docker compose
+# commands that enable it by default, such as exec and run.
+TTY=""
+if [[ ! -t 1 ]]; then
+  TTY="-T"
+fi
+
+# -----------------------------------------------------------------------------
+# Helper functions start with _ and aren't listed in this script's help menu.
+# -----------------------------------------------------------------------------
+
+function _dc {
+  docker compose "${DC}" ${TTY} "${@}"
+}
+
+# =============================================================================
+# Docker Commands
+# =============================================================================
+
+function build {
+  # Build Docker images
+  docker compose build "${@}"
+}
+
+function up {
+  # Start all containers in foreground (shows logs)
+  docker compose up "${@}"
+}
+
+function down {
+  # Stop and remove containers
+  docker compose down "${@}"
+}
+
+function restart {
+  # Restart containers
+  docker compose restart "${@}"
+}
+
+function ps {
+  # List running containers
+  docker compose ps "${@}"
+}
+
+function logs {
+  # Tail Docker logs (all services, or specify a service)
+  docker compose logs -f "${@}"
+}
+
+function cli {
+  # Enter the CLI container interactively (for manual commands)
+  docker compose run --rm ${TTY} cli bash
+}
+
+# =============================================================================
+# App Commands (use --rm to avoid leaving containers running)
+# =============================================================================
+
+function cmd {
+  # Run any command in the web container
+  docker compose run --rm ${TTY} web "${@}"
+}
+
+function rails {
+  # Run any Rails commands
+  cmd rails "${@}"
+}
+
+function bundle {
+  # Run any bundle commands
+  cmd bundle "${@}"
+}
+
+function bash {
+  # Start a Bash shell in web container
+  cmd bash "${@}"
+}
+
+function setup {
+  # Run bin/setup (bundle install + db:prepare) - requires web container to be running
+  _dc web ./bin/setup "${@}"
+}
+
+# =============================================================================
+# Database Commands (use --rm to avoid leaving containers running)
+# =============================================================================
+
+function psql {
+  # Connect to PostgreSQL with psql
+  _dc postgres psql -U postgres "${@}"
+}
+
+function redis-cli {
+  # Connect to Redis with redis-cli
+  _dc redis redis-cli "${@}"
+}
+
+function db:migrate {
+  # Run database migrations
+  rails db:migrate "${@}"
+}
+
+function db:rollback {
+  # Rollback database migrations
+  rails db:rollback "${@}"
+}
+
+function db:reset {
+  # Reset the database (drop + create + migrate)
+  rails db:drop db:create db:migrate
+}
+
+# =============================================================================
+# Development Commands (use --rm to avoid leaving containers running)
+# =============================================================================
+
+function test {
+  # Run tests
+  rails test "${@}"
+}
+
+function console {
+  # Start Rails console
+  rails console
+}
+
+function routes {
+  # Show all routes
+  rails routes "${@}"
+}
+
+function g {
+  # Run Rails generator
+  rails generate "${@}"
+}
+
+function d {
+  # Run Rails destroy
+  rails destroy "${@}"
+}
+
+# =============================================================================
+# Cleanup Commands
+# =============================================================================
+
+function clean {
+  # Remove stopped containers and unused volumes
+  docker compose down -v
+  docker system prune -f
+}
+
+function clean:all {
+  # Remove everything including images (use with caution!)
+  docker compose down -v --rmi all
+  docker system prune -af --volumes
+}
+
+function clean:bundle {
+  # Remove the bundle volume (forces bundle reinstall)
+  docker compose down
+  docker volume rm app_bundle 2>/dev/null || true
+  echo "Bundle volume removed. Run './run build' to reinstall gems."
+}
+
+# =============================================================================
+# Help
+# =============================================================================
+
+function help {
+  printf "\n\033[1;36m🐳 Docker Helper\033[0m\n\n"
+  printf "\033[1mUsage:\033[0m %s <task> [args]\n\n" "${0}"
+  printf "\033[1mTasks:\033[0m\n"
+
+  compgen -A function | grep -v "^_" | cat -n
+
+  printf "\n\033[1mQuick Start:\033[0m\n"
+  printf "  1. ./run cli              # Enter CLI container\n"
+  printf "  2. ./run up               # Start development server\n"
+  printf "  3. Open http://localhost:3000\n"
+  printf "\n\033[1mExtended help:\033[0m Each task has comments for general usage\n\n"
+}
+
+# This idea is heavily inspired by: https://github.com/adriancooney/Taskfile
+TIMEFORMAT=$'\nTask completed in %3lR'
+time "${@:-help}"

@@ -1,0 +1,48 @@
+FROM ruby:3.4-slim AS app
+
+WORKDIR /app
+
+# Configurable UID/GID for permissions (must match host user on Linux)
+ARG UID=1000
+ARG GID=1000
+
+# Install system dependencies
+RUN apt-get update -qq \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+    build-essential \
+    gnupg2 \
+    curl \
+    less \
+    git \
+    libpq-dev \
+    libyaml-dev \
+    postgresql-client \
+    tzdata \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Create a non-root user (compatible with both Mac and Linux)
+RUN bash -c 'set -o pipefail && \
+  if [ ! $(getent group ${GID}) ]; then \
+    groupadd -g ${GID} ruby; \
+  else \
+    GROUP_NAME=$(getent group ${GID} | cut -d: -f1); \
+    if [ "${GROUP_NAME}" != "ruby" ]; then \
+      groupmod -n ruby ${GROUP_NAME}; \
+    fi; \
+  fi && \
+  if [ ! $(getent passwd ${UID}) ]; then \
+    useradd --create-home --no-log-init -u ${UID} -g ${GID} ruby; \
+  fi && \
+  chown -R ${UID}:${GID} /app'
+
+USER ruby
+
+# Set PATH to include local gem binaries
+ARG RAILS_ENV="development"
+ENV RAILS_ENV="${RAILS_ENV}" \
+    PATH="${PATH}:/home/ruby/.local/bin" \
+    USER="ruby"
+
+# Keep the container running for development
+CMD ["bash"]
