@@ -1,14 +1,19 @@
-# Rails Base
+# RailsForge
 
-A Docker-based template for quickly bootstrapping new Rails applications with best practices and modern tooling.
+**Zero-Ruby Rails Bootstrapper**
+
+Create production-ready Rails applications without installing Ruby on your machine. The only requirement is Docker — everything else is handled automatically inside containers.
 
 ## Overview
 
-This project provides a ready-to-use foundation for creating Rails applications in a containerized environment. It includes pre-configured Docker setup, helper scripts, and sensible defaults for both development and production.
+RailsForge lets you generate and run Rails applications in a fully containerized environment. No need to install Ruby, Rails, PostgreSQL, or Redis locally. Just fork this template, run the generator, and start coding.
+
+**Key benefit:** You don't need Ruby installed on your system. Docker handles everything.
 
 ## Features
 
-- **Ruby** (latest stable version detected automatically at project creation)
+- **No Ruby installation required** — Docker handles everything
+- **Latest Ruby** auto-detected from Docker Hub at project creation
 - **Docker & Docker Compose** for consistent development environment
 - **PostgreSQL** as the default database (with PostGIS support)
 - **Redis** for caching and background jobs
@@ -23,7 +28,7 @@ This project provides a ready-to-use foundation for creating Rails applications 
 
 ## Requirements
 
-- Docker
+- **Docker** (the only requirement — Ruby is not needed!)
 - Docker Compose
 
 ## Quick Start
@@ -31,22 +36,24 @@ This project provides a ready-to-use foundation for creating Rails applications 
 1. **Fork or clone this repository**
 
 2. **Run the Rails generator:**
-   ```bash
-   ./rails-new
-   ```
+    ```bash
+    ./rails-new
+    ```
 
-3. **The script will automatically detect** the latest stable Ruby version from Docker Hub
+3. **The script will automatically detect** the latest stable Ruby version from Docker Hub and generate your Rails app inside Docker
 
 4. **Follow the interactive prompts** to configure your new Rails app
 
-4. **Navigate to your new app and start developing:**
-   ```bash
-   cd your-app-name
-   ./run build    # Build Docker images
-   ./run up       # Start development server
-   ```
+5. **Navigate to your new app and start developing:**
+    ```bash
+    cd your-app-name
+    ./run build    # Build Docker images
+    ./run up       # Start development server
+    ```
 
-5. **Open your browser:** http://localhost:3000
+6. **Open your browser:** http://localhost:3000
+
+That's it! No Ruby installation needed.
 
 ## Available Commands
 
