@@ -19,7 +19,7 @@ This project provides a ready-to-use foundation for creating Rails applications 
   - API-only mode
   - Test framework configuration
 - **Development helper script** (`run`) for common tasks
-- **Production-ready Dockerfile** with multi-stage builds and jemalloc
+- **Production-ready Dockerfile** generated from Rails and optimized with multi-stage builds
 
 ## Requirements
 
@@ -85,7 +85,6 @@ The `./run` script provides convenient shortcuts for common tasks:
 ├── rails-new              # Interactive Rails project generator
 ├── run                    # Development helper script
 ├── Dockerfile.development # Development Docker image
-├── Dockerfile.production  # Production Docker image (multi-stage)
 ├── docker-compose.yml     # Services configuration
 ├── .env                   # Environment variables template
 └── .dockerignore          # Docker build exclusions
@@ -122,7 +121,7 @@ The project automatically detects and uses the latest stable Ruby version availa
 
 ## Production Deployment
 
-The included `Dockerfile.production` is optimized for production use:
+The `Dockerfile.production` is automatically generated from Rails' default Dockerfile and optimized for production use:
 - Multi-stage build for smaller image size
 - Jemalloc for reduced memory usage
 - Non-root user for security
