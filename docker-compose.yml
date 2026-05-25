@@ -28,7 +28,7 @@ x-backend: &backend
 
 services:
   postgres:
-    image: postgis/postgis:16-3.5
+    image: postgres:16
     platform: linux/amd64
     container_name: app-postgres
     env_file:
