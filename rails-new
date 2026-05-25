@@ -450,6 +450,88 @@ EOF
 # Main Execution
 # -----------------------------------------------------------------------------
 
+function generate_custom_readme {
+  print_info "Generating custom README..."
+  
+  # Determine target directory
+  local target_dir="."
+  if [ "$USE_SUBDIRECTORY" = true ]; then
+    target_dir="$APP_NAME"
+  fi
+  
+  # Generate custom README
+  cat > "$target_dir/README.md" << EOF
+# $APP_NAME
+
+## Development Setup
+
+This project uses Docker for development. You don't need Ruby, Rails, PostgreSQL, or Redis installed locally.
+
+### Prerequisites
+
+- Docker
+- Docker Compose
+
+### Quick Start
+
+\`\`\`bash
+# Build Docker images
+./run build
+
+# Start development server
+./run up
+
+# Open your browser
+open http://localhost:3000
+\`\`\`
+
+## Available Commands
+
+The \`./run\` script provides convenient shortcuts for common tasks:
+
+### Docker Operations
+- \`./run build\` - Build Docker images
+- \`./run up\` - Start all containers
+- \`./run down\` - Stop containers
+- \`./run logs\` - View container logs
+- \`./run cli\` - Enter CLI container
+
+### Rails Commands
+- \`./run rails <command>\` - Run any Rails command
+- \`./run console\` - Start Rails console
+- \`./run routes\` - Show routes
+- \`./run g <generator>\` - Run generators
+
+### Database
+- \`./run db:migrate\` - Run migrations
+- \`./run db:rollback\` - Rollback migrations
+- \`./run db:reset\` - Reset database
+- \`./run psql\` - Connect to PostgreSQL
+
+### Testing
+- \`./run test\` - Run test suite
+
+### Cleanup
+- \`./run clean\` - Remove stopped containers and volumes
+- \`./run clean:all\` - Remove everything including images
+
+## Project Structure
+
+This project was generated with RailsForge - a Docker-based Rails bootstrapper.
+
+## Environment Variables
+
+Configuration is managed through the \`.env\` file:
+
+- \`UID\` / \`GID\` - User/group IDs
+- \`POSTGRES_USER\` / \`POSTGRES_PASSWORD\` - Database credentials
+- \`DATABASE_URL\` - PostgreSQL connection string
+- \`REDIS_URL\` - Redis connection string
+EOF
+  
+  print_success "Custom README generated"
+}
+
 function cleanup_template_files {
   print_info "Cleaning up template files..."
   
@@ -496,6 +578,7 @@ function main {
   copy_docker_files
   update_docker_files
   update_database_config
+  generate_custom_readme
   cleanup_template_files
   
   echo
